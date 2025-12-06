@@ -1,11 +1,10 @@
-# streamlit_app.py
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import RandomForestClassifier
-import joblib
 
 # ----------------------
 # Page Configuration
@@ -24,9 +23,9 @@ st.set_page_config(
 def load_data():
     """Loads, preprocesses the dataset, and fits the encoders."""
     try:
-        df = pd.read_csv("final_dataset_with_added_crops.csv")
+        df = pd.read_csv("dataset.csv")
     except FileNotFoundError:
-        st.error("Dataset file 'final_dataset_with_added_crops.csv' not found. Please ensure it's in the same directory.")
+        st.error("Dataset file 'dataset.csv' not found. Please ensure it's in the same directory.")
         st.stop()
 
     df.dropna(subset=['soil_texture', 'label'], inplace=True)
@@ -91,25 +90,28 @@ st.sidebar.info(
 # --- Main Page ---
 st.title("🌱 Smart Crop & NPK Recommendation System")
 st.write(
-    "Enter your soil and environmental conditions to get crop and NPK suggestions. "
-    "The model will provide the top recommendations based on your inputs."
+    "Enter your soil and environmental conditions below to get crop and NPK suggestions. "
 )
 
-# ==============================================================================
-# UPDATED SECTION: Replaced sliders with number_input in a 3-column layout
-# ==============================================================================
+# ---------------------------------------------------------
+# INPUT SECTION: Horizontal Number Inputs
+# ---------------------------------------------------------
 st.header("Enter Environmental Conditions")
+
+# Create 3 columns for horizontal layout
 col1, col2, col3 = st.columns(3)
+
 with col1:
     temp = st.number_input(
         "Temperature (°C)",
         min_value=0.0,
-        max_value=50.0,
-        value=25.5,
+        max_value=60.0,
+        value=25.0,
         step=0.1,
         format="%.1f",
-        help="Enter the average temperature in Celsius."
+        help="Average temperature in Celsius."
     )
+
 with col2:
     hum = st.number_input(
         "Humidity (%)",
@@ -118,8 +120,9 @@ with col2:
         value=70.0,
         step=1.0,
         format="%.1f",
-        help="Enter the relative humidity in percentage."
+        help="Relative humidity percentage."
     )
+
 with col3:
     ph = st.number_input(
         "Soil pH",
@@ -128,50 +131,66 @@ with col3:
         value=6.5,
         step=0.1,
         format="%.1f",
-        help="Enter the pH value of the soil."
+        help="Acidity or alkalinity of the soil (0-14)."
     )
 
-# Soil texture selectbox remains below the number inputs
+# Soil texture remains as a dropdown below the numeric inputs
 soil_options = sorted(df['soil_texture'].dropna().unique().tolist())
 soil_type = st.selectbox(
     "Soil Texture",
     soil_options,
     help="Select the texture of your soil."
 )
-# ==============================================================================
-# END OF UPDATED SECTION
-# ==============================================================================
 
 # --- Prediction Logic ---
 if st.button("Get Recommendations", type="primary"):
     # Encode user input
-    soil_encoded = soil_encoder.transform([soil_type])[0]
-    features = np.array([[temp, hum, ph, soil_encoded]])
-    
-    # Get probabilities for all crops
-    probabilities = rf_model.predict_proba(features)[0]
-    
-    # Get top-k predictions
-    top_k_indices = np.argsort(probabilities)[-top_k:][::-1]
-    top_k_crops = crop_encoder.inverse_transform(top_k_indices)
-    top_k_probs = probabilities[top_k_indices]
-    
-    st.header(f"Top {top_k} Crop Recommendations")
+    try:
+        soil_encoded = soil_encoder.transform([soil_type])[0]
+        features = np.array([[temp, hum, ph, soil_encoded]])
+        
+        # Get probabilities for all crops
+        probabilities = rf_model.predict_proba(features)[0]
+        
+        # Get top-k predictions
+        top_k_indices = np.argsort(probabilities)[-top_k:][::-1]
+        top_k_crops = crop_encoder.inverse_transform(top_k_indices)
+        top_k_probs = probabilities[top_k_indices]
+        
+        st.divider()
+        st.subheader(f"Top {top_k} Crop Recommendations")
 
-    for i, (crop, prob) in enumerate(zip(top_k_crops, top_k_probs)):
-        with st.expander(f"**{i+1}. {crop}** (Confidence: {prob:.2%})", expanded=(i==0)):
-            st.markdown(f"#### Suggested NPK Values for **{crop}**")
+        # English → Nepali crop mapping
+        crop_map = {
+            "rice": "धान", "maize": "मकै", "wheat": "गहुँ", "barley": "जौ", "millet": "कोदो",
+            "chickpea": "चना", "kidneybeans": "राजमा", "pigeonpeas": "रहर", "mothbeans": "मोठ",
+            "mungbean": "मुंग", "blackgram": "मास", "lentil": "मसुरो", "pomegranate": "अनार",
+            "banana": "केरा", "mango": "आँप", "grapes": "अंगुर", "watermelon": "तरबुजा",
+            "muskmelon": "खरबुजा", "apple": "स्याउ", "orange": "सुन्तला", "papaya": "मेवा",
+            "coconut": "नरिवल", "cotton": "कपास", "jute": "पटसन (जुट)", "coffee": "कफी",
+            "sugarcane": "उखु", "tea": "चिया", "potato": "आलु", "mustard": "तोरी"
+        }
+
+        for i, (crop, prob) in enumerate(zip(top_k_crops, top_k_probs)):
+            nepali_name = crop_map.get(crop, "")
             
-            # Get NPK values from our lookup dictionary
-            npk_values = avg_npk.get(crop, None)
-            
-            if npk_values:
-                col_n, col_p, col_k = st.columns(3)
-                with col_n:
-                    st.metric("Nitrogen (N)", f"{npk_values['N']:.0f} kg/ha")
-                with col_p:
-                    st.metric("Phosphorus (P)", f"{npk_values['P']:.0f} kg/ha")
-                with col_k:
-                    st.metric("Potassium (K)", f"{npk_values['K']:.0f} kg/ha")
-            else:
-                st.info("NPK average values not available for this crop in the dataset.")
+            # Create an expander for each result
+            with st.expander(f"**{i+1}. {crop}** ({nepali_name}) — Confidence: {prob:.1%}", expanded=(i==0)):
+                st.caption(f"Recommended NPK Fertilizer usage for {crop}:")
+                
+                # Get NPK values from our lookup dictionary
+                npk_values = avg_npk.get(crop, None)
+                
+                if npk_values:
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.metric("Nitrogen (N)", f"{npk_values['N']:.0f} kg/ha")
+                    with c2:
+                        st.metric("Phosphorus (P)", f"{npk_values['P']:.0f} kg/ha")
+                    with c3:
+                        st.metric("Potassium (K)", f"{npk_values['K']:.0f} kg/ha")
+                else:
+                    st.warning("NPK data not available for this crop.")
+                    
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
